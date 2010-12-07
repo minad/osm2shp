@@ -1,12 +1,12 @@
-#include <kcpolydb.h>
+#include <sqlite3.h>
 #include <libshp/shapefil.h>
 #include <stdint.h>
 #include <expat.h>
 #include <map>
-#include <list>
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <limits>
 #include <sys/stat.h>
 #include <boost/foreach.hpp>
 #include <boost/format.hpp>
@@ -16,14 +16,6 @@
 #include <boost/iostreams/filtering_stream.hpp>
 
 #define foreach BOOST_FOREACH
-
-struct Point {
-        double x, y;
-
-        void clear() {
-                x = y = DBL_MAX;
-        }
-};
 
 class Taggable {
         typedef std::map<std::string, std::string> TagMap;
@@ -60,7 +52,7 @@ private:
 };
 
 struct Way : public Taggable {
-        std::list<int64_t> nodes;
+        std::vector<int64_t> nodes;
 
         void clear() {
                 Taggable::clear();
@@ -70,12 +62,13 @@ struct Way : public Taggable {
 
 struct Node : public Taggable {
         int64_t id;
-        Point   point;
+        double  x;
+        double  y;
 
         void clear() {
                 Taggable::clear();
                 id = -1;
-                point.clear();
+                x = y = std::numeric_limits<double>::max();
         }
 };
 
@@ -114,10 +107,8 @@ public:
                 return point_;
         }
 
-        void writePoint(const std::string& name, const Point& point) {
-                SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1,
-                                                       const_cast<double*>(&point.x),
-                                                       const_cast<double*>(&point.y), 0);
+        void writePoint(const std::string& name, double x, double y) {
+                SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1, &x, &y, 0);
                 int id = SHPWriteObject(shp_, -1, obj);
                 SHPDestroyObject(obj);
                 if (id < 0)
@@ -170,42 +161,172 @@ private:
 
 struct PointMap : boost::noncopyable {
         PointMap() {
-                db_.open("pointmap.kct", kyotocabinet::PolyDB::OWRITER | kyotocabinet::PolyDB::OCREATE | kyotocabinet::PolyDB::OTRUNCATE);
-                db_.begin_transaction();
+                if (sqlite3_open_v2("pointmap.sqlite", &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK) {
+                        std::string error_str(sqlite3_errmsg(db_));
+                        sqlite3_close(db_);
+                        error(boost::str(boost::format("cannot open database: %1%") % error_str));
+                }
+                char* err = 0;
+                if (sqlite3_exec(db_, "CREATE TABLE points (id INTEGER NOT NULL PRIMARY KEY, x DOUBLE NOT NULL, y DOUBLE NOT NULL)",
+                                 0, 0, &err) != SQLITE_OK) {
+                        std::string error_str(err);
+                        sqlite3_free(err);
+                        sqlite3_close(db_);
+                        error(boost::str(boost::format("cannot create table: %1%") % error_str));
+                }
+
+                if (sqlite3_exec(db_, "BEGIN", 0, 0, &err) != SQLITE_OK) {
+                        std::string error_str(err);
+                        sqlite3_free(err);
+                        sqlite3_close(db_);
+                        error(boost::str(boost::format("cannot begin transaction: %1%") % error_str));
+                }
+
+                if (sqlite3_prepare_v2(db_,
+                                       "INSERT INTO points (id, x, y) VALUES (?, ?, ?)",
+                                       -1, &insStmt_, 0) != SQLITE_OK) {
+                        std::string error_str(sqlite3_errmsg(db_));
+                        sqlite3_close(db_);
+                        error(boost::str(boost::format("cannot prepare statement: %1%") % error_str));
+                }
         }
 
         ~PointMap() {
-                db_.end_transaction();
-                db_.close();
-                unlink("pointmap.kct");
+                char* err = 0;
+                sqlite3_exec(db_, "COMMIT", 0, 0, &err);
+                sqlite3_finalize(insStmt_);
+                sqlite3_close(db_);
+                unlink("pointmap.sqlite");
         }
 
-        void set(int64_t id, const Point& point) {
-                db_.set(reinterpret_cast<const char*>(&id),    sizeof (id),
-                        reinterpret_cast<const char*>(&point), sizeof (point));
+        void set(int64_t id, double x, double y) {
+                sqlite3_reset(insStmt_);
+                sqlite3_clear_bindings(insStmt_);
+                sqlite3_bind_int64(insStmt_, 1, id);
+                sqlite3_bind_double(insStmt_, 2, x);
+                sqlite3_bind_double(insStmt_, 3, y);
+
+                int ret = sqlite3_step(insStmt_);
+                if (ret != SQLITE_DONE && ret != SQLITE_ROW)
+                        std::cerr << "sqlite3_step() failed" << std::endl;
         }
 
-        bool get(int64_t id, Point* point) {
-                return db_.get(reinterpret_cast<const char*>(&id), sizeof (id),
-                               reinterpret_cast<char*>(point), sizeof (Point)) == sizeof (Point);
+        bool get(const std::vector<int64_t>& ids, double* xResult, double* yResult) {
+                const int blockSize = 128;
+
+                int points = ids.size();
+
+                bool resolved[points];
+                memset(resolved, 0, points * sizeof (bool));
+
+                sqlite3_stmt *blockStmt = 0, *restStmt = 0;
+
+                int todo = points;
+                std::vector<int64_t>::const_iterator i = ids.begin();
+                while (todo > 0) {
+                        int stepSize;
+                        sqlite3_stmt* stmt;
+                        if (todo > blockSize) {
+                                stepSize = blockSize;
+                                if (blockStmt) {
+                                        sqlite3_reset(blockStmt);
+                                        sqlite3_clear_bindings(blockStmt);
+                                } else {
+                                        blockStmt = buildFetchStmt(blockSize);
+                                }
+                                stmt = blockStmt;
+                        } else {
+                                stepSize = todo;
+                                stmt = restStmt = buildFetchStmt(todo);
+                        }
+
+                        if (!stmt) {
+                                if (blockStmt)
+                                        sqlite3_finalize(blockStmt);
+                                if (restStmt)
+                                        sqlite3_finalize(restStmt);
+                                return false;
+                        }
+
+                        for (int n = 1; n <= stepSize; ++n)
+                                sqlite3_bind_int64(stmt, n, *i++);
+
+                        int ret;
+                        while ((ret = sqlite3_step(stmt)) == SQLITE_ROW) {
+                                sqlite3_int64 found = sqlite3_column_int64(stmt, 0);
+                                double x = sqlite3_column_double(stmt, 1);
+                                double y = sqlite3_column_double(stmt, 2);
+                                int n = 0;
+                                foreach (int64_t id, ids) {
+                                        if (id == found) {
+                                                xResult[n] = x;
+                                                yResult[n] = y;
+                                                resolved[n] = true;
+                                        }
+                                        ++n;
+                                }
+                        }
+
+                        if (ret != SQLITE_DONE) {
+                                std::cerr << "sqlite3_step() error: " << sqlite3_errmsg(db_) << std::endl;
+                                if (blockStmt)
+                                        sqlite3_finalize(blockStmt);
+                                if (restStmt)
+                                        sqlite3_finalize(restStmt);
+                                return false;
+                        }
+
+                        todo -= stepSize;
+                }
+
+                if (blockStmt)
+                        sqlite3_finalize(blockStmt);
+                if (restStmt)
+                        sqlite3_finalize(restStmt);
+
+                for (int n = 0; n < points; ++n) {
+                        if (!resolved[n]) {
+                                std::cerr << "unresolved node " << ids.at(n) << std::endl;
+                                return false;
+                        }
+                }
+
+                return true;
         }
 
 private:
-        kyotocabinet::PolyDB db_;
+
+        sqlite3_stmt* buildFetchStmt(int how_many) {
+                std::string sql = "SELECT id, x, y FROM points WHERE id IN (?";
+                for (int i = 1; i < how_many; ++i)
+                        sql += ",?";
+                sql += ")";
+
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) {
+                        std::cerr << "cannot prepare statement " << sqlite3_errmsg(db_) << std::endl;
+                        return 0;
+                }
+
+                return stmt;
+        }
+
+        sqlite3* db_;
+        sqlite3_stmt* insStmt_;
 };
 
 struct State {
-        Way              way;
-        Node             node;
-        PointMap         tmpNodes;
-        int64_t          processedNodes;
-        int64_t          processedWays;
-        int64_t          insertedNodes;
-        int64_t          insertedWays;
-        Taggable*        taggable;
-        std::list<Layer> layers;
+        Way                way;
+        Node               node;
+        PointMap           tmpNodes;
+        int64_t            processedNodes;
+        int64_t            processedWays;
+        int64_t            insertedNodes;
+        int64_t            insertedWays;
+        Taggable*          taggable;
+        std::vector<Layer> layers;
         std::map<std::string, boost::shared_ptr<ShapeFile> > shapeFiles;
-        std::string      basePath;
+        std::string        basePath;
 
         State(const std::string& base)
                 : processedNodes(0), processedWays(0),
@@ -232,9 +353,9 @@ void startNode(State* state, const char** attr) {
                 if (!strcmp(attr[i], "id"))
                         node.id = atoll(attr[i + 1]);
                 else if (!strcmp(attr[i], "lat"))
-                        node.point.y = atof(attr[i + 1]);
+                        node.y = atof(attr[i + 1]);
                 else if (!strcmp(attr[i], "lon"))
-                        node.point.x = atof(attr[i + 1]);
+                        node.x = atof(attr[i + 1]);
         }
 }
 
@@ -289,7 +410,7 @@ void endNode(State* state) {
         if (node.id <= 0)
                 return;
 
-        state->tmpNodes.set(node.id, node.point);
+        state->tmpNodes.set(node.id, node.x, node.y);
 
         const std::string& name = node.tagValue("name");
         if (name.empty())
@@ -299,7 +420,7 @@ void endNode(State* state) {
                 if (!layer.isPoint())
                         continue;
                 if (node.hasTagValue(layer.type(), layer.subType())) {
-                        layer.shapeFile()->writePoint(name, node.point);
+                        layer.shapeFile()->writePoint(name, node.x, node.y);
                         ++state->insertedNodes;
                         break;
                 }
@@ -329,20 +450,10 @@ void endWay(State* state) {
                         continue;
                 if (way.hasTagValue(layer.type(), layer.subType())) {
                         double x[way.nodes.size()], y[way.nodes.size()];
-                        int count = 0;
-                        foreach (int64_t id, way.nodes) {
-                                Point point;
-                                if (!state->tmpNodes.get(id, &point)) {
-                                        std::cerr << "unresolved node " << id << std::endl;
-                                        return;
-                                }
-
-                                x[count] = point.x;
-                                y[count] = point.y;
-                                ++count;
+                        if (state->tmpNodes.get(way.nodes, x, y)) {
+                                layer.shapeFile()->writeLine(way.nodes.size(), x, y);
+                                ++state->insertedWays;
                         }
-                        layer.shapeFile()->writeLine(count, x, y);
-                        ++state->insertedWays;
                         break;
                 }
         }
