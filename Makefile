@@ -1,6 +1,6 @@
 CPP=g++
 CFLAGS=-O2 -Wall
-LDFLAGS=-lexpat -lz -lsqlite3 -lshp -lboost_iostreams
+LDFLAGS=-lexpat -lsqlite3 -lshp -lboost_iostreams
 
 osm2shp: osm2shp.o
 	$(CPP) $(CFLAG) $(LDFLAGS) -o $@ $+

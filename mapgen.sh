@@ -1,8 +1,9 @@
 #! /bin/sh
 
-OSM_PATH=germany.osm.gz
-CONVERTED_PATH=germany
-DEST_PATH=shp
+NAME=germany
+OSM_PATH=$NAME.osm.gz
+CONVERTED_PATH=$NAME.tmp
+DEST_PATH=$NAME
 
 rm -f $DEST_PATH/*
 mkdir -p $DEST_PATH

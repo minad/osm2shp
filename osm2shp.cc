@@ -6,90 +6,159 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
-#include <limits>
 #include <sys/stat.h>
 #include <boost/foreach.hpp>
 #include <boost/format.hpp>
-#include <boost/shared_ptr.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 
 #define foreach BOOST_FOREACH
 
-class Taggable {
-        typedef std::map<std::string, std::string> TagMap;
+namespace xml {
+
+class parse_error: public std::runtime_error {
 public:
-        virtual ~Taggable() {
+        parse_error(const std::string& what, int where)
+                : std::runtime_error(what), where_(where) {
         }
 
-        void addTag(const std::string& key, const std::string& value) {
-                tags_[key] = value;
-        }
-
-        bool hasTag(const std::string& key) const {
-                TagMap::const_iterator i = tags_.find(key);
-                return i != tags_.end();
-        }
-
-        bool hasTagValue(const std::string& key, const std::string& value) const {
-                TagMap::const_iterator i = tags_.find(key);
-                return i != tags_.end() && i->second == value;
-        }
-
-        const std::string& tagValue(const std::string& key) const {
-                TagMap::const_iterator i = tags_.find(key);
-                static const std::string empty;
-                return i == tags_.end() ? empty : i->second;
-        }
-
-        virtual void clear() {
-                tags_.clear();
+        int where() const {
+                return where_;
         }
 
 private:
-        TagMap tags_;
+        int where_;
 };
 
-struct Way : public Taggable {
-        std::vector<int64_t> nodes;
-
-        void clear() {
-                Taggable::clear();
-                nodes.clear();
-        }
-};
-
-struct Node : public Taggable {
-        int64_t id;
-        double  x;
-        double  y;
-
-        void clear() {
-                Taggable::clear();
-                id = -1;
-                x = y = std::numeric_limits<double>::max();
-        }
-};
-
-void error(const std::string& err) {
-        throw std::runtime_error(err);
-}
-
-class ShapeFile : boost::noncopyable {
+class string {
 public:
-        explicit ShapeFile(const std::string& name, bool point)
+
+        string(const char* str)
+                : str_(str) {
+        }
+
+        bool operator==(const char* s) const {
+                return !strcmp(str_, s);
+        }
+
+        const char* c_str() const {
+                return str_;
+        }
+
+private:
+        const char* str_;
+};
+
+class attributes {
+public:
+
+        explicit attributes(const char** attr)
+                : attr_(attr) {
+        }
+
+        const char* operator[](const xml::string& key) const {
+                return get(key);
+        }
+
+        const char* get(const xml::string& key) const {
+                for (int i = 0; attr_[i]; i += 2) {
+                        if (key == attr_[i])
+                                return attr_[i + 1];
+                }
+                throw std::runtime_error(std::string(key.c_str()) + " not found");
+        }
+
+        int64_t as_int64(const xml::string& key) const {
+                return atoll(get(key));
+        }
+
+        double as_double(const xml::string& key) const {
+                return atof(get(key));
+        }
+
+private:
+        const char** attr_;
+};
+
+template<class Handler>
+class parser : public boost::noncopyable {
+public:
+        explicit parser(Handler& handler) {
+                parser_ = XML_ParserCreate(0);
+                if (!parser_)
+                        throw std::runtime_error("Could not allocate parser");
+                XML_SetUserData(parser_, &handler);
+                XML_SetElementHandler(parser_, start_element, end_element);
+        }
+
+        ~parser() {
+                XML_ParserFree(parser_);
+        }
+
+        void parse(std::istream& in) {
+                char buf[64*1024];
+                while (!in.eof()) {
+                        in.read(buf, sizeof (buf));
+                        int len = in.gcount();
+
+                        if (!XML_Parse(parser_, buf, len, 0)) {
+                                throw parse_error(XML_ErrorString(XML_GetErrorCode(parser_)),
+                                                  XML_GetCurrentLineNumber(parser_));
+                        }
+                }
+
+                XML_Parse(parser_, 0, 0, 1);
+        }
+
+        void parse(const std::string& name) {
+                std::ifstream file(name.c_str(), std::ios::in | std::ios::binary);
+                if (!file.good())
+                        throw std::runtime_error("failed to open file " + name);
+                if (name.rfind(".gz") == name.size() - 3) {
+                        boost::iostreams::filtering_stream<boost::iostreams::input> in;
+                        in.push(boost::iostreams::gzip_decompressor());
+                        in.push(file);
+                        parse(in);
+                } else if (name.rfind(".bz2") == name.size() - 4) {
+                        boost::iostreams::filtering_stream<boost::iostreams::input> in;
+                        in.push(boost::iostreams::bzip2_decompressor());
+                        in.push(file);
+                        parse(in);
+                } else {
+                        parse(file);
+                }
+        }
+
+private:
+
+        XML_Parser parser_;
+
+        static void start_element(void* data, const char* name, const char** attr) {
+                static_cast<Handler*>(data)->start_element(string(name), attributes(attr));
+        }
+
+        static void end_element(void* data, const char* name) {
+                static_cast<Handler*>(data)->end_element(string(name));
+        }
+};
+
+} // namespace xml
+
+class shape_file : boost::noncopyable {
+public:
+        explicit shape_file(const std::string& name, bool point)
                 : point_(point), shp_(0), dbf_(0) {
                 shp_ = SHPCreate(name.c_str(), point ? SHPT_POINT : SHPT_ARC);
                 if (!shp_)
-                        error("Could not open shapefile " + name);
+                        throw std::runtime_error("Could not open shapefile " + name);
                 if (point) {
                         dbf_ = DBFCreate(name.c_str());
                         if (!dbf_) {
                                 SHPClose(shp_);
-                                error("Could not open dbffile " + name);
+                                throw std::runtime_error("Could not open dbffile " + name);
                         }
-                        DBFAddField(dbf_, "name", FTString, 256, 0);
+                        DBFAddField(dbf_, "name", FTString, 64, 0);
                 }
                 std::ofstream out((name + ".prj").c_str(), std::ios::out);
                 out << "GEOGCS[\"GCS_WGS_1984\",DATUM[\"D_WGS_1984\",SPHEROID[\"WGS_1984\",6378137,298.257223563]],"
@@ -97,32 +166,34 @@ public:
                 out.close();
         }
 
-        ~ShapeFile() {
+        ~shape_file() {
                 SHPClose(shp_);
                 if (dbf_)
                         DBFClose(dbf_);
         }
 
-        bool isPoint() const {
+        bool is_point() const {
                 return point_;
         }
 
-        void writePoint(const std::string& name, double x, double y) {
+        void write_point(const std::string& name, double x, double y) {
+                assert(point_);
                 SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1, &x, &y, 0);
                 int id = SHPWriteObject(shp_, -1, obj);
                 SHPDestroyObject(obj);
                 if (id < 0)
-                        error("failed to write point object");
+                        throw std::runtime_error("failed to write point object");
                 DBFWriteStringAttribute(dbf_, id, 0, name.c_str());
         }
 
-        void writeLine(size_t size, const double* x, const double* y) {
+        void write_line(size_t size, const double* x, const double* y) {
+                assert(!point_);
                 SHPObject* obj = SHPCreateSimpleObject(SHPT_ARC, size,
                                                        const_cast<double*>(x), const_cast<double*>(y), 0);
                 int id = SHPWriteObject(shp_, -1, obj);
                 SHPDestroyObject(obj);
                 if (id < 0)
-                        error("failed to write line object");
+                        throw std::runtime_error("failed to write line object");
         }
 
 private:
@@ -131,121 +202,108 @@ private:
         DBFHandle dbf_;
 };
 
-class Layer {
+namespace osm {
+
+class layer {
 public:
-        Layer(ShapeFile* shapeFile, const std::string& type, const std::string& subType)
-                : shapeFile_(shapeFile), type_(type), subType_(subType) {
+        layer(shape_file* shape, const std::string& type, const std::string& subtype)
+                : shape_(shape), type_(type), subtype_(subtype) {
         }
 
         const std::string& type() const {
                 return type_;
         }
 
-        const std::string& subType() const {
-                return subType_;
+        const std::string& subtype() const {
+                return subtype_;
         }
 
-        bool isPoint() const {
-                return shapeFile_->isPoint();
-        }
-
-        ShapeFile* shapeFile() const {
-                return shapeFile_;
+        shape_file* shape() const {
+                return shape_;
         }
 
 private:
-        ShapeFile*  shapeFile_;
+        shape_file* shape_;
         std::string type_;
-        std::string subType_;
+        std::string subtype_;
 };
 
-struct PointMap : boost::noncopyable {
-        PointMap() {
-                if (sqlite3_open_v2("pointmap.sqlite", &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK) {
-                        std::string error_str(sqlite3_errmsg(db_));
-                        sqlite3_close(db_);
-                        error(boost::str(boost::format("cannot open database: %1%") % error_str));
-                }
-                char* err = 0;
-                if (sqlite3_exec(db_, "CREATE TABLE points (id INTEGER NOT NULL PRIMARY KEY, x DOUBLE NOT NULL, y DOUBLE NOT NULL)",
-                                 0, 0, &err) != SQLITE_OK) {
-                        std::string error_str(err);
-                        sqlite3_free(err);
-                        sqlite3_close(db_);
-                        error(boost::str(boost::format("cannot create table: %1%") % error_str));
-                }
+template<typename T>
+inline bool has_key(const T& map, const typename T::key_type& key) {
+        return map.find(key) != map.end();
+}
 
-                if (sqlite3_exec(db_, "BEGIN", 0, 0, &err) != SQLITE_OK) {
-                        std::string error_str(err);
-                        sqlite3_free(err);
-                        sqlite3_close(db_);
-                        error(boost::str(boost::format("cannot begin transaction: %1%") % error_str));
-                }
+template<typename T, class K, class V>
+inline bool has_key_value(const T& map, const K& key, const V& value) {
+        typename T::const_iterator i = map.find(key);
+        return i != map.end() && i->second == value;
+}
 
-                if (sqlite3_prepare_v2(db_,
-                                       "INSERT INTO points (id, x, y) VALUES (?, ?, ?)",
-                                       -1, &insStmt_, 0) != SQLITE_OK) {
-                        std::string error_str(sqlite3_errmsg(db_));
-                        sqlite3_close(db_);
-                        error(boost::str(boost::format("cannot prepare statement: %1%") % error_str));
+struct point_database : boost::noncopyable {
+        point_database(const char* name)
+                : db_(0), ins_stmt_(0) {
+                try {
+                        if (sqlite3_open_v2(name, &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK)
+                                db_error("cannot open database");
+
+                        exec("CREATE TABLE IF NOT EXISTS points (id INTEGER NOT NULL PRIMARY KEY,"
+                             "x DOUBLE NOT NULL, y DOUBLE NOT NULL)");
+
+                        exec("BEGIN");
+
+                        if (sqlite3_prepare_v2(db_,
+                                               "INSERT INTO points (id, x, y) VALUES (?, ?, ?)",
+                                               -1, &ins_stmt_, 0) != SQLITE_OK)
+                                db_error("cannot prepare statement");
+                } catch (...) {
+                        close();
+                        throw;
                 }
         }
 
-        ~PointMap() {
-                char* err = 0;
-                sqlite3_exec(db_, "COMMIT", 0, 0, &err);
-                sqlite3_finalize(insStmt_);
-                sqlite3_close(db_);
-                unlink("pointmap.sqlite");
+        ~point_database() {
+                close();
         }
 
         void set(int64_t id, double x, double y) {
-                sqlite3_reset(insStmt_);
-                sqlite3_clear_bindings(insStmt_);
-                sqlite3_bind_int64(insStmt_, 1, id);
-                sqlite3_bind_double(insStmt_, 2, x);
-                sqlite3_bind_double(insStmt_, 3, y);
+                sqlite3_reset(ins_stmt_);
+                sqlite3_clear_bindings(ins_stmt_);
+                sqlite3_bind_int64(ins_stmt_, 1, id);
+                sqlite3_bind_double(ins_stmt_, 2, x);
+                sqlite3_bind_double(ins_stmt_, 3, y);
 
-                int ret = sqlite3_step(insStmt_);
+                int ret = sqlite3_step(ins_stmt_);
                 if (ret != SQLITE_DONE && ret != SQLITE_ROW)
-                        std::cerr << "sqlite3_step() failed" << std::endl;
+                        db_error("step failed");
         }
 
         bool get(const std::vector<int64_t>& ids, double* xResult, double* yResult) {
-                const int blockSize = 128;
+                const int block_size = 128;
 
                 int points = ids.size();
 
                 bool resolved[points];
                 memset(resolved, 0, points * sizeof (bool));
 
-                sqlite3_stmt *blockStmt = 0, *restStmt = 0;
+                stmt_wrapper block_stmt, rest_stmt;
 
                 int todo = points;
                 std::vector<int64_t>::const_iterator i = ids.begin();
                 while (todo > 0) {
                         int stepSize;
                         sqlite3_stmt* stmt;
-                        if (todo > blockSize) {
-                                stepSize = blockSize;
-                                if (blockStmt) {
-                                        sqlite3_reset(blockStmt);
-                                        sqlite3_clear_bindings(blockStmt);
+                        if (todo > block_size) {
+                                stepSize = block_size;
+                                if (block_stmt) {
+                                        sqlite3_reset(block_stmt);
+                                        sqlite3_clear_bindings(block_stmt);
                                 } else {
-                                        blockStmt = buildFetchStmt(blockSize);
+                                        block_stmt.stmt = build_fetch_stmt(block_size);
                                 }
-                                stmt = blockStmt;
+                                stmt = block_stmt;
                         } else {
                                 stepSize = todo;
-                                stmt = restStmt = buildFetchStmt(todo);
-                        }
-
-                        if (!stmt) {
-                                if (blockStmt)
-                                        sqlite3_finalize(blockStmt);
-                                if (restStmt)
-                                        sqlite3_finalize(restStmt);
-                                return false;
+                                stmt = rest_stmt.stmt = build_fetch_stmt(todo);
                         }
 
                         for (int n = 1; n <= stepSize; ++n)
@@ -267,22 +325,11 @@ struct PointMap : boost::noncopyable {
                                 }
                         }
 
-                        if (ret != SQLITE_DONE) {
-                                std::cerr << "sqlite3_step() error: " << sqlite3_errmsg(db_) << std::endl;
-                                if (blockStmt)
-                                        sqlite3_finalize(blockStmt);
-                                if (restStmt)
-                                        sqlite3_finalize(restStmt);
-                                return false;
-                        }
+                        if (ret != SQLITE_DONE)
+                                db_error("step failed");
 
                         todo -= stepSize;
                 }
-
-                if (blockStmt)
-                        sqlite3_finalize(blockStmt);
-                if (restStmt)
-                        sqlite3_finalize(restStmt);
 
                 for (int n = 0; n < points; ++n) {
                         if (!resolved[n]) {
@@ -294,241 +341,229 @@ struct PointMap : boost::noncopyable {
                 return true;
         }
 
+        void clear() {
+                exec("DELETE FROM points");
+        }
+
 private:
 
-        sqlite3_stmt* buildFetchStmt(int how_many) {
+        void close() {
+                if (ins_stmt_)
+                        sqlite3_finalize(ins_stmt_);
+                if (db_) {
+                        sqlite3_exec(db_, "COMMIT", 0, 0, 0);
+                        sqlite3_close(db_);
+                }
+        }
+
+        struct stmt_wrapper {
+                sqlite3_stmt* stmt;
+
+                stmt_wrapper()
+                        : stmt(0) {
+                }
+
+                operator sqlite3_stmt*() {
+                        return stmt;
+                }
+
+                ~stmt_wrapper() {
+                        sqlite3_finalize(stmt);
+                }
+        };
+
+        sqlite3_stmt* build_fetch_stmt(int how_many) {
                 std::string sql = "SELECT id, x, y FROM points WHERE id IN (?";
                 for (int i = 1; i < how_many; ++i)
                         sql += ",?";
                 sql += ")";
 
                 sqlite3_stmt* stmt;
-                if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK) {
-                        std::cerr << "cannot prepare statement " << sqlite3_errmsg(db_) << std::endl;
-                        return 0;
-                }
+                if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, 0) != SQLITE_OK)
+                        db_error("cannot prepare statement");
 
                 return stmt;
         }
 
-        sqlite3* db_;
-        sqlite3_stmt* insStmt_;
+        void db_error(const char* msg) {
+                throw std::runtime_error(std::string(msg) + ": " + sqlite3_errmsg(db_));
+        }
+
+        void exec(const char* sql) {
+                char* error = 0;
+                if (sqlite3_exec(db_, sql, 0, 0, &error) != SQLITE_OK) {
+                        std::string err(error);
+                        sqlite3_free(error);
+                        throw std::runtime_error(std::string("invalid sql - ") + sql + " - " + err);
+                }
+        }
+
+        sqlite3*      db_;
+        sqlite3_stmt* ins_stmt_;
 };
 
-struct State {
-        Way                way;
-        Node               node;
-        PointMap           tmpNodes;
-        int64_t            processedNodes;
-        int64_t            processedWays;
-        int64_t            insertedNodes;
-        int64_t            insertedWays;
-        Taggable*          taggable;
-        std::vector<Layer> layers;
-        std::map<std::string, boost::shared_ptr<ShapeFile> > shapeFiles;
-        std::string        basePath;
+class handler {
+        typedef std::map<std::string, shape_file*> shape_map;
+        typedef std::map<std::string, std::string> tag_map;
 
-        State(const std::string& base)
-                : processedNodes(0), processedWays(0),
-                  insertedNodes(0), insertedWays(0), taggable(0), basePath(base) {
+public:
+
+        handler(const std::string& base)
+                : tmp_nodes_(".tmpnodes.sqlite"),
+                  processed_nodes_(0), processed_ways_(0),
+                  exported_nodes_(0), exported_ways_(0),
+                  base_path_(base), taggable_(false) {
+
+                tmp_nodes_.clear();
 		mkdir(base.c_str(), 0755);
+
+                add_shape("roadbig_line",    false);
+                add_shape("roadmedium_line", false);
+                add_shape("roadsmall_line",  false);
+                add_shape("citybig_point",   true);
+                add_shape("citysmall_point", true);
+
+                add_layer("roadbig_line",    "highway", "motorway");
+                add_layer("roadbig_line",    "highway", "trunk");
+                add_layer("roadmedium_line", "highway", "primary");
+                add_layer("roadsmall_line" , "highway", "secondary");
+                add_layer("citybig_point",   "place",   "city");
+                add_layer("citysmall_point", "place",   "town");
 	}
 
-        void addShapeFile(const std::string& name, bool point) {
-                shapeFiles[name] = boost::shared_ptr<ShapeFile>(new ShapeFile(basePath + "/" + name, point));
+        ~handler() {
+                std::cout << "Exported nodes: "   << exported_nodes_
+                          << "\nExported ways:  " << exported_ways_ << std::endl;
+
+                foreach (shape_map::value_type& value, shapes_)
+                        delete value.second;
         }
 
-        void addLayer(const std::string& name, const std::string& type, const std::string& subType) {
-                layers.push_back(Layer(shapeFiles[name].get(), type, subType));
+        void start_element(const xml::string& name, const xml::attributes& attr) {
+                if (name == "node")
+                        start_node(attr);
+                else if (name == "way")
+                        start_way(attr);
+                else if (name == "nd")
+                        start_nd(attr);
+                else if (taggable_ && name == "tag")
+                        start_tag(attr);
         }
+
+        void end_element(const xml::string& name) {
+                if (name == "node")
+                        end_node();
+                else if (name == "way")
+                        end_way();
+        }
+
+private:
+
+        void add_shape(const std::string& name, bool point) {
+                shapes_[name] = new shape_file(base_path_ + "/" + name, point);
+        }
+
+        void add_layer(const std::string& name, const std::string& type, const std::string& subtype) {
+                shape_file* shape = shapes_[name];
+                assert(shape);
+                if (shape->is_point())
+                        node_layers_.push_back(layer(shape, type, subtype));
+                else
+                        way_layers_.push_back(layer(shape, type, subtype));
+        }
+
+        void start_node(const xml::attributes& attr) {
+                taggable_ = true;
+                tags_.clear();
+                id_ = attr.as_int64("id");
+                x_  = attr.as_double("lon");
+                y_  = attr.as_double("lat");
+        }
+
+        void start_way(const xml::attributes& attr) {
+                taggable_ = true;
+                tags_.clear();
+                nodes_.clear();
+        }
+
+        void start_nd(const xml::attributes& attr) {
+                nodes_.push_back(attr.as_int64("ref"));
+        }
+
+        void start_tag(const xml::attributes& attr) {
+                tags_[attr["k"]] = attr["v"];
+        }
+
+        void end_node() {
+                taggable_ = false;
+
+                if (++processed_nodes_ % 100000 == 0)
+                        std::cout << processed_nodes_ << " nodes processed" << std::endl;
+
+                if (id_ <= 0)
+                        return;
+
+                tmp_nodes_.set(id_, x_, y_);
+
+                tag_map::const_iterator i = tags_.find("name");
+                if (i == tags_.end())
+                        return;
+
+                foreach (const layer& lay, node_layers_) {
+                        if (has_key_value(tags_, lay.type(), lay.subtype())) {
+                                lay.shape()->write_point(i->second, x_, y_);
+                                ++exported_nodes_;
+                                break;
+                        }
+                }
+        }
+
+        void end_way() {
+                taggable_ = false;
+
+                if (++processed_ways_ % 10000 == 0)
+                        std::cout << processed_ways_ << " ways processed" << std::endl;
+
+                if (is_area() || nodes_.size() < 2)
+                        return;
+
+                foreach (const layer& lay, way_layers_) {
+                        if (has_key_value(tags_, lay.type(), lay.subtype())) {
+                                double x[nodes_.size()], y[nodes_.size()];
+                                if (tmp_nodes_.get(nodes_, x, y)) {
+                                        lay.shape()->write_line(nodes_.size(), x, y);
+                                        ++exported_ways_;
+                                }
+                                break;
+                        }
+                }
+        }
+
+        bool is_area() {
+                return has_key_value(tags_, "area", "yes")               ||
+                                has_key(tags_, "landuse")                ||
+                                has_key_value(tags_, "natural", "land")  ||
+                                has_key_value(tags_, "natural", "water") ||
+                                has_key_value(tags_, "natural", "woord");
+        }
+
+        point_database       tmp_nodes_;
+        int64_t              processed_nodes_;
+        int64_t              processed_ways_;
+        int64_t              exported_nodes_;
+        int64_t              exported_ways_;
+        std::vector<layer>   node_layers_;
+        std::vector<layer>   way_layers_;
+        std::vector<int64_t> nodes_;
+        std::string          base_path_;
+        bool                 taggable_;
+        tag_map              tags_;
+        int64_t              id_;
+        double               x_, y_;
+        shape_map            shapes_;
 };
 
-void startNode(State* state, const char** attr) {
-        state->taggable = &state->node;
-
-        Node& node = state->node;
-        node.clear();
-
-        for (int i = 0; attr[i]; i += 2) {
-                if (!strcmp(attr[i], "id"))
-                        node.id = atoll(attr[i + 1]);
-                else if (!strcmp(attr[i], "lat"))
-                        node.y = atof(attr[i + 1]);
-                else if (!strcmp(attr[i], "lon"))
-                        node.x = atof(attr[i + 1]);
-        }
-}
-
-void startWay(State* state, const char** attr) {
-        state->taggable = &state->way;
-        state->way.clear();
-}
-
-void startNd(State* state, const char** attr) {
-        for (int i = 0; attr[i]; i += 2) {
-                if (!strcmp(attr[i], "ref")) {
-                        state->way.nodes.push_back(atoll(attr[i+1]));
-                        break;
-                }
-        }
-}
-
-void startTag(State* state, const char** attr) {
-        const char *key = 0, *value = 0;
-        for (int i = 0; attr[i]; i += 2) {
-                if (!strcmp(attr[i], "k"))
-                        key = attr[i + 1];
-                else if (!strcmp(attr[i], "v"))
-                        value = attr[i + 1];
-                if (key && value && state->taggable) {
-                        state->taggable->addTag(key, value);
-                        break;
-                }
-        }
-}
-
-void startElement(void* data, const char* name, const char** attr) {
-        State* state = static_cast<State*>(data);
-        if (!strcmp(name, "node"))
-                startNode(state, attr);
-        else if (!strcmp(name, "tag"))
-                startTag(state, attr);
-        else if (!strcmp(name, "way"))
-                startWay(state, attr);
-        else if (!strcmp(name, "nd"))
-                startNd(state, attr);
-}
-
-void endNode(State* state) {
-        state->taggable = 0;
-
-        if (++state->processedNodes % 100000 == 0)
-                std::cout << state->processedNodes << " nodes processed" << std::endl;
-
-        Node& node = state->node;
-
-        if (node.id <= 0)
-                return;
-
-        state->tmpNodes.set(node.id, node.x, node.y);
-
-        const std::string& name = node.tagValue("name");
-        if (name.empty())
-                return;
-
-        foreach (const Layer& layer, state->layers) {
-                if (!layer.isPoint())
-                        continue;
-                if (node.hasTagValue(layer.type(), layer.subType())) {
-                        layer.shapeFile()->writePoint(name, node.x, node.y);
-                        ++state->insertedNodes;
-                        break;
-                }
-        }
-}
-
-bool isArea(const Taggable& tags) {
-        return tags.hasTagValue("area", "yes")               ||
-                        tags.hasTag("landuse")               ||
-                        tags.hasTagValue("natural", "land")  ||
-                        tags.hasTagValue("natural", "water") ||
-                        tags.hasTagValue("natural", "woord");
-}
-
-void endWay(State* state) {
-        state->taggable = 0;
-
-        if (++state->processedWays % 10000 == 0)
-                std::cout << state->processedWays << " ways processed" << std::endl;
-
-        Way& way = state->way;
-        if (isArea(way) || way.nodes.size() < 2)
-                return;
-
-        foreach (const Layer& layer, state->layers) {
-                if (layer.isPoint())
-                        continue;
-                if (way.hasTagValue(layer.type(), layer.subType())) {
-                        double x[way.nodes.size()], y[way.nodes.size()];
-                        if (state->tmpNodes.get(way.nodes, x, y)) {
-                                layer.shapeFile()->writeLine(way.nodes.size(), x, y);
-                                ++state->insertedWays;
-                        }
-                        break;
-                }
-        }
-}
-
-void endElement(void* data, const char* name) {
-        State* state = static_cast<State*>(data);
-        if (!strcmp(name, "node"))
-                endNode(state);
-        else if (!strcmp(name, "way"))
-                endWay(state);
-}
-
-void configure(State& state) {
-        state.addShapeFile("roadbig_line",    false);
-        state.addShapeFile("roadmedium_line", false);
-        state.addShapeFile("roadsmall_line",  false);
-        state.addShapeFile("citybig_point",   true);
-        state.addShapeFile("citysmall_point", true);
-
-        state.addLayer("roadbig_line",    "highway", "motorway");
-        state.addLayer("roadbig_line",    "highway", "trunk");
-        state.addLayer("roadmedium_line", "highway", "primary");
-        state.addLayer("roadsmall_line" , "highway", "secondary");
-        state.addLayer("citybig_point",   "place",   "city");
-        state.addLayer("citysmall_point", "place",   "town");
-}
-
-void parseStream(std::istream& in, const std::string& base) {
-        XML_Parser parser = XML_ParserCreate(0);
-        if (!parser)
-                error("Could not allocate parser");
-	XML_SetElementHandler(parser, startElement, endElement);
-
-        State state(base);
-        configure(state);
-        XML_SetUserData(parser, &state);
-
-        char buf[64*1024];
-	while (!in.eof()) {
-                in.read(buf, sizeof (buf));
-                int len = in.gcount();
-
-		if (!XML_Parse(parser, buf, len, 0)) {
-                        error(boost::str(boost::format("Parse error at line %1%: %2%") %
-                                         XML_GetCurrentLineNumber(parser) %
-                                         XML_ErrorString(XML_GetErrorCode(parser))));
-                }
-        }
-
-        XML_Parse(parser, 0, 0, 1);
-        XML_ParserFree(parser);
-
-        std::cout << "Exported nodes: "   << state.insertedNodes
-                  << "\nExported ways:  " << state.insertedWays << std::endl;
-}
-
-void parseFile(const std::string& name, const std::string& base) {
-        std::ifstream file(name.c_str(), std::ios::in | std::ios::binary);
-        if (!file.good())
-                error("failed to open file " + name);
-        if (name.rfind(".gz") == name.size() - 3) {
-                boost::iostreams::filtering_stream<boost::iostreams::input> in;
-                in.push(boost::iostreams::gzip_decompressor());
-                in.push(file);
-                parseStream(in, base);
-        } else if (name.rfind(".bz2") == name.size() - 4) {
-                boost::iostreams::filtering_stream<boost::iostreams::input> in;
-                in.push(boost::iostreams::bzip2_decompressor());
-                in.push(file);
-                parseStream(in, base);
-        } else {
-                parseStream(file, base);
-        }
-}
+} // namespace osm
 
 int main(int argc, char* argv[]) {
         try {
@@ -536,7 +571,9 @@ int main(int argc, char* argv[]) {
                         std::cerr << "usage: " << argv[0] << " planet.osm(.gz|.bz2) base-path" << std::endl;
                         return 1;
                 }
-                parseFile(argv[1], argv[2]);
+                osm::handler handler(argv[2]);
+                xml::parser<osm::handler> parser(handler);
+                parser.parse(argv[1]);
                 return 0;
         } catch (const std::exception& ex) {
                 std::cerr << ex.what() << std::endl;
