@@ -9,17 +9,6 @@ fi
 
 NAME=$1
 
-if [ -e "$NAME.osm" ]; then
-    OSM_PATH=$NAME.osm
-elif [ -e "$NAME.osm.gz" ]; then
-    OSM_PATH=$NAME.osm.gz
-elif [ -e "$NAME.osm.bz2" ]; then
-    OSM_PATH=$NAME.osm.bz2
-else
-    echo "$NAME.osm(.gz|.bz2) not found"
-    exit 1
-fi
-
 CONVERTED_PATH=$NAME.converted
 DEST_PATH=$NAME
 
@@ -32,6 +21,17 @@ if [ -e $CONVERTED_PATH ]; then
     echo "================================================================================"
     echo "Using already converted osm shapefiles from directory $CONVERTED_PATH"
 else
+    if [ -e "$NAME.osm" ]; then
+	OSM_PATH=$NAME.osm
+    elif [ -e "$NAME.osm.gz" ]; then
+	OSM_PATH=$NAME.osm.gz
+    elif [ -e "$NAME.osm.bz2" ]; then
+	OSM_PATH=$NAME.osm.bz2
+    else
+	echo "$NAME.osm(.gz|.bz2) not found"
+	exit 1
+    fi
+
     echo "================================================================================"
     echo "Converting $OSM_PATH to shapefiles in directory $CONVERTED_PATH"
     echo "================================================================================"
