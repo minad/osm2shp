@@ -431,8 +431,8 @@ public:
 	}
 
         ~handler() {
-                std::cout << "Exported nodes: "   << exported_nodes_
-                          << "\nExported ways:  " << exported_ways_ << std::endl;
+                std::cout << "Total exported nodes: "   << exported_nodes_
+                          << "\nTotal exported ways:  " << exported_ways_ << std::endl;
 
                 foreach (shape_map::value_type& value, shapes_)
                         delete value.second;
@@ -497,7 +497,7 @@ private:
                 taggable_ = false;
 
                 if (++processed_nodes_ % 100000 == 0)
-                        std::cout << processed_nodes_ << " nodes processed" << std::endl;
+                        std::cout << processed_nodes_ << " nodes processed, " << exported_nodes_ << " nodes exported" << std::endl;
 
                 if (id_ <= 0)
                         return;
@@ -521,7 +521,7 @@ private:
                 taggable_ = false;
 
                 if (++processed_ways_ % 10000 == 0)
-                        std::cout << processed_ways_ << " ways processed" << std::endl;
+                        std::cout << processed_ways_ << " ways processed, " << exported_ways_ << " ways exported" << std::endl;
 
                 if (is_area() || nodes_.size() < 2)
                         return;
