@@ -1,17 +1,56 @@
 #! /bin/sh
 
-NAME=germany
-OSM_PATH=$NAME.osm.gz
-CONVERTED_PATH=$NAME.tmp
+if [ $# -ne 1 ]; then
+    echo "usage: $0 base-name"
+    echo ""
+    echo "Generate shapefile directory 'planet' from 'planet.osm*' with '$0 planet'."
+    exit 1
+fi
+
+NAME=$1
+
+if [ -e "$NAME.osm" ]; then
+    OSM_PATH=$NAME.osm
+elif [ -e "$NAME.osm.gz" ]; then
+    OSM_PATH=$NAME.osm.gz
+elif [ -e "$NAME.osm.bz2" ]; then
+    OSM_PATH=$NAME.osm.bz2
+else
+    echo "$NAME.osm(.gz|.bz2) not found"
+    exit 1
+fi
+
+CONVERTED_PATH=$NAME.converted
 DEST_PATH=$NAME
 
-rm -f $DEST_PATH/*
-mkdir -p $DEST_PATH
+remove_converted() {
+    rm -rf $CONVERTED_PATH
+    exit 1
+}
 
-if [ ! -e $CONVERTED_PATH ]; then
+if [ -e $CONVERTED_PATH ]; then
+    echo "================================================================================"
+    echo "Using already converted osm shapefiles from directory $CONVERTED_PATH"
+else
+    echo "================================================================================"
+    echo "Converting $OSM_PATH to shapefiles in directory $CONVERTED_PATH"
+    echo "================================================================================"
+    trap remove_converted INT
     ./osm2shp $OSM_PATH $CONVERTED_PATH
 fi
 
+echo "================================================================================"
+echo "Postprocess shapefiles with GRASS GIS - Destination directory $DEST_PATH"
+echo "================================================================================"
+
+if [ "$GISBASE" = "" ]; then
+    echo "You must be in GRASS GIS to continue with this step."
+    echo "Restart this program in GRASS GIS to continue."
+    exit 1
+fi
+
+rm -f $DEST_PATH/*
+mkdir -p $DEST_PATH
 cp $CONVERTED_PATH/city* $DEST_PATH
 
 g.remove vect=roadbig_line,roadbig_line1,roadbig_line2,roadbig_line3
@@ -37,3 +76,7 @@ v.generalize input=roadsmall_line2 output=roadsmall_line3 method=douglas thresho
 v.clean input=roadsmall_line3 output=roadsmall_line tool=snap,break,rmdupl thres=0.005
 g.remove vect=roadsmall_line1,roadsmall_line2,roadsmall_line3
 v.out.ogr input=roadsmall_line type=line dsn=$DEST_PATH/roadsmall_line.shp
+
+echo "================================================================================"
+echo "Finished postprocessing. Processed shapefiles are in directory $DEST_PATH"
+echo "================================================================================"
