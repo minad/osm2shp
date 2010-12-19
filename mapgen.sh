@@ -77,6 +77,14 @@ v.clean input=roadsmall_line3 output=roadsmall_line tool=snap,break,rmdupl thres
 g.remove vect=roadsmall_line1,roadsmall_line2,roadsmall_line3
 v.out.ogr input=roadsmall_line type=line dsn=$DEST_PATH/roadsmall_line.shp
 
+g.remove vect=railway_line,railway_line1,railway_line2,railway_line3
+v.in.ogr -t dsn=$CONVERTED_PATH layer=railway_line output=railway_line1
+v.build.polylines input=railway_line1 output=railway_line2
+v.generalize input=railway_line2 output=railway_line3 method=douglas threshold=0.002
+v.clean input=railway_line3 output=railway_line tool=snap,break,rmdupl thres=0.002
+g.remove vect=railway_line1,railway_line2,railway_line3
+v.out.ogr input=railway_line type=line dsn=$DEST_PATH/railway_line.shp
+
 echo "================================================================================"
 echo "Finished postprocessing. Processed shapefiles are in directory $DEST_PATH"
 echo "================================================================================"

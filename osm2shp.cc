@@ -121,14 +121,11 @@ void parser<Handler>::parse(std::istream& in) {
         char buf[64*1024];
         while (!in.eof()) {
                 in.read(buf, sizeof (buf));
-                int len = in.gcount();
-
-                if (!XML_Parse(parser_, buf, len, 0)) {
+                if (!XML_Parse(parser_, buf, in.gcount(), 0)) {
                         throw parse_error(XML_ErrorString(XML_GetErrorCode(parser_)),
                                           XML_GetCurrentLineNumber(parser_));
                 }
         }
-
         XML_Parse(parser_, 0, 0, 1);
 }
 
@@ -543,7 +540,6 @@ handler::handler(const std::string& base)
         add_layer("citymedium_point", "place",    "town");
         add_layer("citymedium_point", "place",    "suburb");
         add_layer("citysmall_point",  "place",    "village");
-        add_layer("water_line",       "waterway", "stream");
         add_layer("water_line",       "waterway", "river");
         add_layer("water_line",       "waterway", "canal");
         add_layer("water_area",       "natural",  "water");
