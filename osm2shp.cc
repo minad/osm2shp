@@ -160,8 +160,17 @@ public:
                         DBFAddField(dbf_, "name", FTString, 64, 0);
                 }
                 std::ofstream out((name + ".prj").c_str(), std::ios::out);
-                out << "GEOGCS[\"GCS_WGS_1984\",DATUM[\"D_WGS_1984\",SPHEROID[\"WGS_1984\",6378137,298.257223563]],"
-                    << "PRIMEM[\"Greenwich\",0],UNIT[\"Degree\",0.017453292519943295]]";
+                out << "GEOGCS[\"WGS 84\",\n"
+                       "       DATUM[\"WGS_1984\",\n"
+                       "            SPHEROID[\"WGS 84\",6378137,298.257223563,\n"
+                       "                      AUTHORITY[\"EPSG\",\"7030\"]],\n"
+                       "            TOWGS84[0,0,0,0,0,0,0],\n"
+                       "             AUTHORITY[\"EPSG\",\"6326\"]],\n"
+                       "       PRIMEM[\"Greenwich\",0,\n"
+                       "              AUTHORITY[\"EPSG\",\"8901\"]],\n"
+                       "       UNIT[\"degree\",0.0174532925199433,\n"
+                       "            AUTHORITY[\"EPSG\",\"9108\"]],\n"
+                       "       AUTHORITY[\"EPSG\",\"4326\"]]";
                 out.close();
         }
 
