@@ -147,19 +147,68 @@ private:
 class shape_file : boost::noncopyable {
 public:
         explicit shape_file(const std::string& name, bool point)
-                : point_(point), shp_(0), dbf_(0) {
-                shp_ = SHPCreate(name.c_str(), point ? SHPT_POINT : SHPT_ARC);
+                : name_(name), point_(point), shp_(0), dbf_(0), current_id_(-1) {
+                open_shp();
+                create_prj();
+        }
+
+        ~shape_file() {
+                SHPClose(shp_);
+                if (dbf_)
+                        DBFClose(dbf_);
+        }
+
+        void add_field(const char* name) {
+                open_dbf();
+                std::cout << DBFAddField(dbf_, name, FTString, 64, 0) << std::endl;
+        }
+
+        bool is_point() const {
+                return point_;
+        }
+
+        void add_attribute(int field, const std::string& value) {
+                assert(current_id_ >= 0);
+                assert(dbf_);
+                DBFWriteStringAttribute(dbf_, current_id_, field, value.c_str());
+        }
+
+        void point(double x, double y) {
+                assert(point_);
+                SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1, &x, &y, 0);
+                current_id_ = SHPWriteObject(shp_, -1, obj);
+                SHPDestroyObject(obj);
+                if (current_id_ < 0)
+                        throw std::runtime_error("failed to write point object");
+        }
+
+        void line(size_t size, const double* x, const double* y) {
+                assert(!point_);
+                SHPObject* obj = SHPCreateSimpleObject(SHPT_ARC, size,
+                                                       const_cast<double*>(x), const_cast<double*>(y), 0);
+                current_id_ = SHPWriteObject(shp_, -1, obj);
+                SHPDestroyObject(obj);
+                if (current_id_ < 0)
+                        throw std::runtime_error("failed to write line object");
+        }
+
+private:
+        void open_shp() {
+                shp_ = SHPCreate(name_.c_str(), point_ ? SHPT_POINT : SHPT_ARC);
                 if (!shp_)
-                        throw std::runtime_error("Could not open shapefile " + name);
-                if (point) {
-                        dbf_ = DBFCreate(name.c_str());
-                        if (!dbf_) {
-                                SHPClose(shp_);
-                                throw std::runtime_error("Could not open dbffile " + name);
-                        }
-                        DBFAddField(dbf_, "name", FTString, 64, 0);
+                        throw std::runtime_error("Could not open shapefile " + name_);
+        }
+
+        void open_dbf() {
+                if (!dbf_) {
+                        dbf_ = DBFCreate(name_.c_str());
+                        if (!dbf_)
+                                throw std::runtime_error("Could not open dbf file " + name_);
                 }
-                std::ofstream out((name + ".prj").c_str(), std::ios::out);
+        }
+
+        void create_prj() {
+                std::ofstream out((name_ + ".prj").c_str());
                 out << "GEOGCS[\"WGS 84\",\n"
                        "       DATUM[\"WGS_1984\",\n"
                        "            SPHEROID[\"WGS 84\",6378137,298.257223563,\n"
@@ -174,40 +223,11 @@ public:
                 out.close();
         }
 
-        ~shape_file() {
-                SHPClose(shp_);
-                if (dbf_)
-                        DBFClose(dbf_);
-        }
-
-        bool is_point() const {
-                return point_;
-        }
-
-        void write_point(const std::string& name, double x, double y) {
-                assert(point_);
-                SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1, &x, &y, 0);
-                int id = SHPWriteObject(shp_, -1, obj);
-                SHPDestroyObject(obj);
-                if (id < 0)
-                        throw std::runtime_error("failed to write point object");
-                DBFWriteStringAttribute(dbf_, id, 0, name.c_str());
-        }
-
-        void write_line(size_t size, const double* x, const double* y) {
-                assert(!point_);
-                SHPObject* obj = SHPCreateSimpleObject(SHPT_ARC, size,
-                                                       const_cast<double*>(x), const_cast<double*>(y), 0);
-                int id = SHPWriteObject(shp_, -1, obj);
-                SHPDestroyObject(obj);
-                if (id < 0)
-                        throw std::runtime_error("failed to write line object");
-        }
-
-private:
-        bool      point_;
-        SHPHandle shp_;
-        DBFHandle dbf_;
+        std::string name_;
+        bool       point_;
+        SHPHandle  shp_;
+        DBFHandle  dbf_;
+        int        current_id_;
 };
 
 namespace osm {
@@ -469,6 +489,8 @@ private:
 
         void add_shape(const std::string& name, bool point) {
                 shapes_[name] = new shape_file(base_path_ + "/" + name, point);
+                if (point)
+                        shapes_[name]->add_field("name");
         }
 
         void add_layer(const std::string& name, const std::string& type, const std::string& subtype) {
@@ -519,7 +541,8 @@ private:
 
                 foreach (const layer& lay, node_layers_) {
                         if (has_key_value(tags_, lay.type(), lay.subtype())) {
-                                lay.shape()->write_point(i->second, x_, y_);
+                                lay.shape()->point(x_, y_);
+                                lay.shape()->add_attribute(0, i->second);
                                 ++exported_nodes_;
                                 break;
                         }
@@ -539,7 +562,7 @@ private:
                         if (has_key_value(tags_, lay.type(), lay.subtype())) {
                                 double x[nodes_.size()], y[nodes_.size()];
                                 if (tmp_nodes_.get(nodes_, x, y)) {
-                                        lay.shape()->write_line(nodes_.size(), x, y);
+                                        lay.shape()->line(nodes_.size(), x, y);
                                         ++exported_ways_;
                                 }
                                 break;
