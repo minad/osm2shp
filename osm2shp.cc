@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <sys/stat.h>
+#include <boost/format.hpp>
 #include <boost/foreach.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
@@ -160,7 +161,7 @@ public:
 
         void add_field(const char* name) {
                 open_dbf();
-                std::cout << DBFAddField(dbf_, name, FTString, 64, 0) << std::endl;
+                DBFAddField(dbf_, name, FTString, 64, 0);
         }
 
         bool is_point() const {
@@ -268,10 +269,10 @@ inline bool has_key_value(const T& map, const K& key, const V& value) {
 }
 
 struct point_database : boost::noncopyable {
-        point_database(const char* name)
-                : db_(0), ins_stmt_(0) {
+        point_database(const std::string& name)
+                : name_(name), db_(0), ins_stmt_(0) {
                 try {
-                        if (sqlite3_open_v2(name, &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK)
+                        if (sqlite3_open_v2(name.c_str(), &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK)
                                 db_error("cannot open database");
 
                         exec("CREATE TABLE IF NOT EXISTS points (id INTEGER NOT NULL PRIMARY KEY,"
@@ -291,6 +292,10 @@ struct point_database : boost::noncopyable {
 
         ~point_database() {
                 close();
+        }
+
+        const std::string& name() const {
+                return name_;
         }
 
         void set(int64_t id, double x, double y) {
@@ -426,6 +431,7 @@ private:
                 }
         }
 
+        std::string   name_;
         sqlite3*      db_;
         sqlite3_stmt* ins_stmt_;
 };
@@ -437,7 +443,7 @@ class handler {
 public:
 
         handler(const std::string& base)
-                : tmp_nodes_(".tmpnodes.sqlite"),
+                : tmp_nodes_(boost::str(boost::format("tmpnodes-%1%.sqlite") % getpid())),
                   processed_nodes_(0), processed_ways_(0),
                   exported_nodes_(0), exported_ways_(0),
                   base_path_(base), taggable_(false) {
@@ -460,6 +466,8 @@ public:
 	}
 
         ~handler() {
+                unlink(tmp_nodes_.name().c_str());
+
                 std::cout << "Total exported nodes: "   << exported_nodes_
                           << "\nTotal exported ways:  " << exported_ways_ << std::endl;
 
