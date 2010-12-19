@@ -168,17 +168,17 @@ namespace osm {
 
 class shape_file : boost::noncopyable {
 public:
-        explicit shape_file(const std::string& name, bool point);
+        explicit shape_file(const std::string& name, int type);
         ~shape_file();
 
-        bool is_point() const {
-                return point_;
+        int type() const {
+                return type_;
         }
 
         void add_field(const char* name);
         void add_attribute(int field, const std::string& value);
         void point(double x, double y);
-        void line(size_t size, const double* x, const double* y);
+        void multipoint(int type, size_t size, const double* x, const double* y);
 
 private:
         void open_shp();
@@ -186,14 +186,14 @@ private:
         void create_prj();
 
         std::string name_;
-        bool       point_;
-        SHPHandle  shp_;
-        DBFHandle  dbf_;
-        int        current_id_;
+        int         type_;
+        SHPHandle   shp_;
+        DBFHandle   dbf_;
+        int         current_id_;
 };
 
-shape_file::shape_file(const std::string& name, bool point)
-        : name_(name), point_(point), shp_(0), dbf_(0), current_id_(-1) {
+shape_file::shape_file(const std::string& name, int type)
+        : name_(name), type_(type), shp_(0), dbf_(0), current_id_(-1) {
         open_shp();
         create_prj();
 }
@@ -216,7 +216,7 @@ void shape_file::add_attribute(int field, const std::string& value) {
 }
 
 void shape_file::point(double x, double y) {
-        assert(point_);
+        assert(type_ == SHPT_POINT);
         SHPObject* obj = SHPCreateSimpleObject(SHPT_POINT, 1, &x, &y, 0);
         current_id_ = SHPWriteObject(shp_, -1, obj);
         SHPDestroyObject(obj);
@@ -224,18 +224,18 @@ void shape_file::point(double x, double y) {
                 throw std::runtime_error("failed to write point object");
 }
 
-void shape_file::line(size_t size, const double* x, const double* y) {
-        assert(!point_);
-        SHPObject* obj = SHPCreateSimpleObject(SHPT_ARC, size,
+void shape_file::multipoint(int type, size_t size, const double* x, const double* y) {
+        assert(type_ == type);
+        SHPObject* obj = SHPCreateSimpleObject(type, size,
                                                const_cast<double*>(x), const_cast<double*>(y), 0);
         current_id_ = SHPWriteObject(shp_, -1, obj);
         SHPDestroyObject(obj);
         if (current_id_ < 0)
-                throw std::runtime_error("failed to write line object");
+                throw std::runtime_error("failed to write multipoint object");
 }
 
 void shape_file::open_shp() {
-        shp_ = SHPCreate(name_.c_str(), point_ ? SHPT_POINT : SHPT_ARC);
+        shp_ = SHPCreate(name_.c_str(), type_);
         if (!shp_)
                 throw std::runtime_error("Could not open shapefile " + name_);
 }
@@ -311,10 +311,6 @@ struct point_database : boost::noncopyable {
         void set(int64_t id, double x, double y);
         bool get(const std::vector<int64_t>& ids, double* x_result, double* y_result);
 
-        void clear() {
-                exec("DELETE FROM points");
-        }
-
 private:
 
         struct stmt_wrapper {
@@ -369,6 +365,7 @@ point_database::point_database(const std::string& name)
 
 point_database::~point_database() {
         close();
+        unlink(name_.c_str());
 }
 
 void point_database::set(int64_t id, double x, double y) {
@@ -492,7 +489,7 @@ public:
 
 private:
 
-        void add_shape(const std::string& name, bool point);
+        void add_shape(const std::string& name, int type);
         void add_layer(const std::string& name, const std::string& type, const std::string& subtype);
         void start_node(const xml::attributes& attr);
         void start_way(const xml::attributes& attr);
@@ -507,8 +504,7 @@ private:
         int64_t              processed_ways_;
         int64_t              exported_nodes_;
         int64_t              exported_ways_;
-        std::vector<layer>   node_layers_;
-        std::vector<layer>   way_layers_;
+        std::vector<layer>   layers_;
         std::vector<int64_t> nodes_;
         std::string          base_path_;
         bool                 taggable_;
@@ -525,26 +521,45 @@ handler::handler(const std::string& base)
           exported_nodes_(0), exported_ways_(0),
           base_path_(base), taggable_(false) {
 
-        tmp_nodes_.clear();
         mkdir(base.c_str(), 0755);
 
-        add_shape("roadbig_line",    false);
-        add_shape("roadmedium_line", false);
-        add_shape("roadsmall_line",  false);
-        add_shape("citybig_point",   true);
-        add_shape("citysmall_point", true);
+        add_shape("roadbig_line",     SHPT_ARC);
+        add_shape("roadmedium_line",  SHPT_ARC);
+        add_shape("roadsmall_line",   SHPT_ARC);
+        add_shape("railway_line",     SHPT_ARC);
+        add_shape("citybig_point",    SHPT_POINT);
+        add_shape("citymedium_point", SHPT_POINT);
+        add_shape("citysmall_point",  SHPT_POINT);
+        add_shape("water_line",       SHPT_ARC);
+        add_shape("water_area",       SHPT_POLYGON);
+        //add_shape("city_area",        SHPT_POLYGON);
 
-        add_layer("roadbig_line",    "highway", "motorway");
-        add_layer("roadbig_line",    "highway", "trunk");
-        add_layer("roadmedium_line", "highway", "primary");
-        add_layer("roadsmall_line" , "highway", "secondary");
-        add_layer("citybig_point",   "place",   "city");
-        add_layer("citysmall_point", "place",   "town");
+        add_layer("roadbig_line",     "highway",  "motorway");
+        add_layer("roadbig_line",     "highway",  "trunk");
+        add_layer("roadmedium_line",  "highway",  "primary");
+        add_layer("roadsmall_line" ,  "highway",  "secondary");
+        add_layer("railway_line",     "railway",  "rail");
+        add_layer("citybig_point",    "place",    "city");
+        add_layer("citymedium_point", "place",    "town");
+        add_layer("citymedium_point", "place",    "suburb");
+        add_layer("citysmall_point",  "place",    "village");
+        add_layer("water_line",       "waterway", "stream");
+        add_layer("water_line",       "waterway", "river");
+        add_layer("water_line",       "waterway", "canal");
+        add_layer("water_area",       "natural",  "water");
+        // add_layer("city_area",        "place",    "city");
+        // add_layer("city_area",        "place",    "town");
+        // add_layer("city_area",        "place",    "suburb");
+        // add_layer("city_area",        "place",    "village");
+        // add_layer("city_area",        "landuse",  "residential");
+        // add_layer("city_area",        "landuse",  "commercial");
+        // add_layer("city_area",        "landuse",  "garages");
+        // add_layer("city_area",        "landuse",  "industrial");
+        // add_layer("city_area",        "landuse",  "retail");
+        // add_layer("city_area",        "landuse",  "village_green");
 }
 
 handler::~handler() {
-        unlink(tmp_nodes_.name().c_str());
-
         std::cout << "Total exported nodes: "   << exported_nodes_
                   << "\nTotal exported ways:  " << exported_ways_ << std::endl;
 
@@ -570,19 +585,16 @@ void handler::end_element(const xml::string& name) {
                 end_way();
 }
 
-void handler::add_shape(const std::string& name, bool point) {
-        shapes_[name] = new shape_file(base_path_ + "/" + name, point);
-        if (point)
+void handler::add_shape(const std::string& name, int type) {
+        shapes_[name] = new shape_file(base_path_ + "/" + name, type);
+        if (type == SHPT_POINT)
                 shapes_[name]->add_field("name");
 }
 
 void handler::add_layer(const std::string& name, const std::string& type, const std::string& subtype) {
         shape_file* shape = shapes_[name];
         assert(shape);
-        if (shape->is_point())
-                node_layers_.push_back(layer(shape, type, subtype));
-        else
-                way_layers_.push_back(layer(shape, type, subtype));
+        layers_.push_back(layer(shape, type, subtype));
 }
 
 void handler::start_node(const xml::attributes& attr) {
@@ -622,8 +634,9 @@ void handler::end_node() {
         if (i == tags_.end())
                 return;
 
-        foreach (const layer& lay, node_layers_) {
-                if (has_key_value(tags_, lay.type(), lay.subtype())) {
+        foreach (const layer& lay, layers_) {
+                if (lay.shape()->type() == SHPT_POINT &&
+                    has_key_value(tags_, lay.type(), lay.subtype())) {
                         lay.shape()->point(x_, y_);
                         lay.shape()->add_attribute(0, i->second);
                         ++exported_nodes_;
@@ -638,14 +651,15 @@ void handler::end_way() {
         if (++processed_ways_ % 10000 == 0)
                 std::cout << processed_ways_ << " ways processed, " << exported_ways_ << " ways exported" << std::endl;
 
-        if (is_area() || nodes_.size() < 2)
+        int type = is_area() ? SHPT_POLYGON : SHPT_ARC;
+        if ((type == SHPT_POLYGON && nodes_.size() < 3) || nodes_.size() < 2)
                 return;
 
-        foreach (const layer& lay, way_layers_) {
-                if (has_key_value(tags_, lay.type(), lay.subtype())) {
+        foreach (const layer& lay, layers_) {
+                if (lay.shape()->type() == type && has_key_value(tags_, lay.type(), lay.subtype())) {
                         double x[nodes_.size()], y[nodes_.size()];
                         if (tmp_nodes_.get(nodes_, x, y)) {
-                                lay.shape()->line(nodes_.size(), x, y);
+                                lay.shape()->multipoint(type, nodes_.size(), x, y);
                                 ++exported_ways_;
                         }
                         break;
