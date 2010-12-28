@@ -1,12 +1,20 @@
 CPP=g++
+CC=gcc
 CFLAGS=-O2 -Wall
-LDFLAGS=-lexpat -lsqlite3 -lshp -lboost_iostreams
+
+all: osmfilter osmchange osm2shp
 
 osm2shp: osm2shp.o
-	$(CPP) $(CFLAG) $(LDFLAGS) -o $@ $+
+	$(CPP) $(CFLAGS) -lexpat -lsqlite3 -lshp -lboost_iostreams -o $@ $+
+
+osmfilter: osmfilter.o
+	$(CC) $(CFLAGS) -o $@ $+
+
+osmchange: osmchange.o
+	$(CC) $(CFLAGS) -o $@ $+
 
 %.o: %.cc
-	$(CPP) $(CFLAGS) $(LDFLAGS) -c $<
+	$(CPP) $(CFLAGS) -c $<
 
 clean:
 	rm -f *.o
