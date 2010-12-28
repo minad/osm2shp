@@ -10,6 +10,16 @@ Usage
 
     osm2shp planet.osm.bz2 shape-path
 
+Other included tools
+====================
+
+mapgen.sh - GRASS GIS shell script which calls osm2shp first,  processes the shapefiles with GRASS
+            to reduce the geometrical complexity and exports shapefiles afterwards.
+osmfilter - Filter OSM files (e.g. Drop relations, changesets, ...)
+            See http://wiki.openstreetmap.org/wiki/Osmfilter.
+osmchange - Apply OSM changeset to OSM file
+            See http://wiki.openstreetmap.org/wiki/Osmchange_(program).
+
 License
 =======
 
