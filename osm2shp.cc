@@ -524,35 +524,25 @@ handler::handler(const std::string& base)
         add_shape("roadmedium_line",  SHPT_ARC);
         add_shape("roadsmall_line",   SHPT_ARC);
         add_shape("railway_line",     SHPT_ARC);
-        add_shape("citybig_point",    SHPT_POINT);
-        add_shape("citymedium_point", SHPT_POINT);
-        add_shape("citysmall_point",  SHPT_POINT);
+        add_shape("city_point",       SHPT_POINT);
+        add_shape("town_point",       SHPT_POINT);
+        add_shape("suburb_point",     SHPT_POINT);
+        add_shape("village_point",    SHPT_POINT);
         add_shape("water_line",       SHPT_ARC);
         add_shape("water_area",       SHPT_POLYGON);
-        //add_shape("city_area",        SHPT_POLYGON);
 
         add_layer("roadbig_line",     "highway",  "motorway");
         add_layer("roadbig_line",     "highway",  "trunk");
         add_layer("roadmedium_line",  "highway",  "primary");
         add_layer("roadsmall_line" ,  "highway",  "secondary");
         add_layer("railway_line",     "railway",  "rail");
-        add_layer("citybig_point",    "place",    "city");
-        add_layer("citymedium_point", "place",    "town");
-        add_layer("citymedium_point", "place",    "suburb");
-        add_layer("citysmall_point",  "place",    "village");
+        add_layer("city_point",       "place",    "city");
+        add_layer("town_point",       "place",    "town");
+        add_layer("suburb_point",     "place",    "suburb");
+        add_layer("village_point",    "place",    "village");
         add_layer("water_line",       "waterway", "river");
         add_layer("water_line",       "waterway", "canal");
         add_layer("water_area",       "natural",  "water");
-        // add_layer("city_area",        "place",    "city");
-        // add_layer("city_area",        "place",    "town");
-        // add_layer("city_area",        "place",    "suburb");
-        // add_layer("city_area",        "place",    "village");
-        // add_layer("city_area",        "landuse",  "residential");
-        // add_layer("city_area",        "landuse",  "commercial");
-        // add_layer("city_area",        "landuse",  "garages");
-        // add_layer("city_area",        "landuse",  "industrial");
-        // add_layer("city_area",        "landuse",  "retail");
-        // add_layer("city_area",        "landuse",  "village_green");
 }
 
 handler::~handler() {

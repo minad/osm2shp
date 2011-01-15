@@ -51,7 +51,7 @@ fi
 
 rm -f $DEST_PATH/*
 mkdir -p $DEST_PATH
-cp $CONVERTED_PATH/city* $DEST_PATH
+cp $CONVERTED_PATH/*_point* $DEST_PATH
 
 g.remove vect=roadbig_line,roadbig_line1,roadbig_line2,roadbig_line3
 v.in.ogr -t dsn=$CONVERTED_PATH layer=roadbig_line output=roadbig_line1
