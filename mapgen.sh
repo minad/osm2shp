@@ -74,8 +74,8 @@ v.out.ogr input=roadmedium_line type=line dsn=$DEST_PATH/roadmedium_line.shp
 g.remove vect=roadsmall_line,roadsmall_line1,roadsmall_line2,roadsmall_line3,roadsmall_line4
 v.in.ogr -t dsn=$CONVERTED_PATH layer=roadsmall_line output=roadsmall_line1
 v.build.polylines input=roadsmall_line1 output=roadsmall_line2
-v.generalize input=roadsmall_line2 output=roadsmall_line3 method=douglas threshold=0.005
-v.clean input=roadsmall_line3 output=roadsmall_line4 tool=snap,break,rmdupl thres=0.005
+v.generalize input=roadsmall_line2 output=roadsmall_line3 method=douglas threshold=0.001
+v.clean input=roadsmall_line3 output=roadsmall_line4 tool=snap,break,rmdupl thres=0.001
 v.clean input=roadsmall_line4 output=roadsmall_line tool=rmline type=line
 g.remove vect=roadsmall_line1,roadsmall_line2,roadsmall_line3,roadsmall_line4
 v.out.ogr input=roadsmall_line type=line dsn=$DEST_PATH/roadsmall_line.shp
