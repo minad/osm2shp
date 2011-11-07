@@ -1,3 +1,4 @@
+#include "osm/layer.hpp"
 #include "osm/point_database.hpp"
 #include "osm/shapefile.hpp"
 #include "xml.hpp"
@@ -13,30 +14,6 @@
 #define foreach BOOST_FOREACH
 
 namespace osm {
-
-class layer {
-public:
-        layer(shape_file* shape, const std::string& type, const std::string& subtype)
-                : shape_(shape), type_(type), subtype_(subtype) {
-        }
-
-        const std::string& type() const {
-                return type_;
-        }
-
-        const std::string& subtype() const {
-                return subtype_;
-        }
-
-        shape_file* shape() const {
-                return shape_;
-        }
-
-private:
-        shape_file* shape_;
-        std::string type_;
-        std::string subtype_;
-};
 
 template<typename T>
 inline bool has_key(const T& map, const typename T::key_type& key) {
