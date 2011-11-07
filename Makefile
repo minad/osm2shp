@@ -5,6 +5,7 @@ CFLAGS=-O2 -Wall
 all: osm2shp
 
 FILES = \
+  xml.o \
   osm2shp.o \
   osm/shapefile.o \
   osm/point_database.o
