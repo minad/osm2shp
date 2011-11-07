@@ -6,7 +6,8 @@ all: osm2shp
 
 FILES = \
   osm2shp.o \
-  osm/shapefile.o
+  osm/shapefile.o \
+  osm/point_database.o
 
 osm2shp: $(FILES)
 	$(CPP) $(CFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams -o $@
