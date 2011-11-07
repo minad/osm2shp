@@ -4,11 +4,15 @@ CFLAGS=-O2 -Wall
 
 all: osm2shp
 
-osm2shp: osm2shp.o
+FILES = \
+  osm2shp.o \
+  osm/shapefile.o
+
+osm2shp: $(FILES)
 	$(CPP) $(CFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams -o $@
 
 %.o: %.cc
-	$(CPP) $(CFLAGS) -c $<
+	$(CPP) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o
+	rm -f $(FILES) osm2shp
