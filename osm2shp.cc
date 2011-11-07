@@ -1,5 +1,5 @@
 #include <sqlite3.h>
-#include <libshp/shapefil.h>
+#include <shapefil.h>
 #include <stdint.h>
 #include <expat.h>
 #include <map>
