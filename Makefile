@@ -8,6 +8,7 @@ FILES = \
   xml.o \
   osm2shp.o \
   osm/shapefile.o \
+  osm/handler.o \
   osm/point_database.o
 
 osm2shp: $(FILES)
