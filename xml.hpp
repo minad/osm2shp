@@ -2,9 +2,7 @@
 #define OSM2SHP_XML_HPP
 
 #include <expat.h>
-#include <iostream>
 #include <fstream>
-#include <boost/format.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
 #include <boost/iostreams/filtering_stream.hpp>

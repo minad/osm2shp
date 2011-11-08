@@ -3,10 +3,16 @@
 
 #include "point_database.hpp"
 #include "layer.hpp"
-#include "../xml.hpp"
 
 #include <map>
 #include <vector>
+
+namespace xml {
+
+class string;
+class attributes;
+
+}
 
 namespace osm {
 

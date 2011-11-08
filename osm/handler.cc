@@ -1,9 +1,11 @@
 #include "handler.hpp"
 #include "shapefile.hpp"
+#include "../xml.hpp"
 
 #include <shapefil.h>
 #include <sys/stat.h>
 #include <boost/foreach.hpp>
+#include <boost/format.hpp>
 
 #define foreach BOOST_FOREACH
 

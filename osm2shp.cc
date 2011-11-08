@@ -1,10 +1,5 @@
 #include "osm/handler.hpp"
-#include "osm/layer.hpp"
-#include "osm/point_database.hpp"
-#include "osm/shapefile.hpp"
 #include "xml.hpp"
-
-#include <boost/format.hpp>
 
 int main(int argc, char* argv[]) {
         try {
