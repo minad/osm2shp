@@ -2,19 +2,20 @@ CPP=g++
 CC=gcc
 CFLAGS=-O2 -Wall
 
-all: osmfilter osmchange osm2shp
+all: osm2shp
 
-osm2shp: osm2shp.o
-	$(CPP) $(CFLAGS) -lexpat -lsqlite3 -lshp -lboost_iostreams -o $@ $+
+FILES = \
+  xml.o \
+  osm2shp.o \
+  osm/shapefile.o \
+  osm/handler.o \
+  osm/point_database.o
 
-osmfilter: osmfilter.o
-	$(CC) $(CFLAGS) -o $@ $+
-
-osmchange: osmchange.o
-	$(CC) $(CFLAGS) -o $@ $+
+osm2shp: $(FILES)
+	$(CPP) $(CFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams -o $@
 
 %.o: %.cc
-	$(CPP) $(CFLAGS) -c $<
+	$(CPP) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o
+	rm -f $(FILES) osm2shp
