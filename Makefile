@@ -1,6 +1,7 @@
-CPP=g++
-CC=gcc
-CFLAGS=-O2 -Wall -Wredundant-decls 
+CPP = g++
+
+CXXFLAGS = -ggdb -Wall -Wredundant-decls
+CXXFLAGS += -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
 
 all: osm2shp
 
@@ -15,10 +16,10 @@ FILES = \
   osm/point_database.o
 
 osm2shp: $(FILES)
-	$(CPP) $(CFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams $(LIB_PROTOBUF) $(LIB_SHAPE) -o $@
+	$(CPP) $(CXXFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams $(LIB_PROTOBUF) $(LIB_SHAPE) -o $@
 
 %.o: %.cc
-	$(CPP) $(CFLAGS) -c $< -o $@
+	$(CPP) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(FILES) osm2shp
