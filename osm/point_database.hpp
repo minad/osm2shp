@@ -6,6 +6,8 @@
 #include <boost/utility.hpp>
 #include <stdexcept>
 
+#include <osmium/osm/way_node_list.hpp>
+
 namespace osm {
 
 struct point_database : boost::noncopyable {
@@ -17,7 +19,7 @@ struct point_database : boost::noncopyable {
         }
 
         void set(int64_t id, double x, double y);
-        bool get(const std::vector<int64_t>& ids, double* x_result, double* y_result);
+        bool get(const Osmium::OSM::WayNodeList& way_node_list, double* x_result, double* y_result);
 
 private:
 

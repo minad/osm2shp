@@ -1,6 +1,5 @@
 #include "handler.hpp"
 #include "shapefile.hpp"
-#include "../xml.hpp"
 
 #include <shapefil.h>
 #include <sys/stat.h>
@@ -11,22 +10,23 @@
 
 namespace osm {
 
-template<typename T>
-inline bool has_key(const T& map, const typename T::key_type& key) {
-        return map.find(key) != map.end();
+template<typename T, class K>
+inline bool has_key(const T& map, const K& key) {
+		const char *v = map.get_tag_by_key(key);
+		return v;
 }
 
 template<typename T, class K, class V>
 inline bool has_key_value(const T& map, const K& key, const V& value) {
-        typename T::const_iterator i = map.find(key);
-        return i != map.end() && i->second == value;
+		const char *v = map.get_tag_by_key(key);
+		return v && !strcmp(v, value);
 }
 
 handler::handler(const std::string& base)
         : tmp_nodes_(boost::str(boost::format("tmpnodes-%1%.sqlite") % getpid())),
           processed_nodes_(0), processed_ways_(0),
           exported_nodes_(0), exported_ways_(0),
-          base_path_(base), taggable_(false) {
+          base_path_(base) {
 
         mkdir(base.c_str(), 0755);
 
@@ -63,24 +63,6 @@ handler::~handler() {
                 delete value.second;
 }
 
-void handler::start_element(const xml::string& name, const xml::attributes& attr) {
-        if (name == "node")
-                start_node(attr);
-        else if (name == "way")
-                start_way(attr);
-        else if (name == "nd")
-                start_nd(attr);
-        else if (taggable_ && name == "tag")
-                start_tag(attr);
-}
-
-void handler::end_element(const xml::string& name) {
-        if (name == "node")
-                end_node();
-        else if (name == "way")
-                end_way();
-}
-
 void handler::add_shape(const std::string& name, int type) {
         shapes_[name] = new shape_file(base_path_ + "/" + name, type);
         if (type == SHPT_POINT)
@@ -93,30 +75,10 @@ void handler::add_layer(const std::string& name, const std::string& type, const 
         layers_.push_back(layer(shape, type, subtype));
 }
 
-void handler::start_node(const xml::attributes& attr) {
-        taggable_ = true;
-        tags_.clear();
-        id_ = attr.as_int64("id");
-        x_  = attr.as_double("lon");
-        y_  = attr.as_double("lat");
-}
-
-void handler::start_way(const xml::attributes& attr) {
-        taggable_ = true;
-        tags_.clear();
-        nodes_.clear();
-}
-
-void handler::start_nd(const xml::attributes& attr) {
-        nodes_.push_back(attr.as_int64("ref"));
-}
-
-void handler::start_tag(const xml::attributes& attr) {
-        tags_[attr["k"]] = attr["v"];
-}
-
-void handler::end_node() {
-        taggable_ = false;
+void handler::node(const shared_ptr<Osmium::OSM::Node const>& node) {
+		int64_t id_ = node->id();
+		double x_  = node->position().lon();
+		double y_  = node->position().lat();
 
         if (++processed_nodes_ % 100000 == 0)
                 std::cout << processed_nodes_ << " nodes processed, " << exported_nodes_ << " nodes exported" << std::endl;
@@ -126,36 +88,34 @@ void handler::end_node() {
 
         tmp_nodes_.set(id_, x_, y_);
 
-        tag_map::const_iterator i = tags_.find("name");
-        if (i == tags_.end())
+        const char* name = node->tags().get_tag_by_key("name");
+        if (!name)
                 return;
 
         foreach (const layer& lay, layers_) {
                 if (lay.shape()->type() == SHPT_POINT &&
-                    has_key_value(tags_, lay.type(), lay.subtype())) {
+                    has_key_value(node->tags(), lay.type().c_str(), lay.subtype().c_str())) {
                         lay.shape()->point(x_, y_);
-                        lay.shape()->add_attribute(0, i->second);
+                        lay.shape()->add_attribute(0, name);
                         ++exported_nodes_;
                         break;
                 }
         }
 }
 
-void handler::end_way() {
-        taggable_ = false;
-
+void handler::way(const shared_ptr<Osmium::OSM::Way>& way) {
         if (++processed_ways_ % 10000 == 0)
                 std::cout << processed_ways_ << " ways processed, " << exported_ways_ << " ways exported" << std::endl;
 
-        int type = is_area() ? SHPT_POLYGON : SHPT_ARC;
-        if ((type == SHPT_POLYGON && nodes_.size() < 3) || nodes_.size() < 2)
+        int type = is_area(way) ? SHPT_POLYGON : SHPT_ARC;
+        if ((type == SHPT_POLYGON && way->nodes().size() < 3) || way->nodes().size() < 2)
                 return;
 
         foreach (const layer& lay, layers_) {
-                if (lay.shape()->type() == type && has_key_value(tags_, lay.type(), lay.subtype())) {
-                        double x[nodes_.size()], y[nodes_.size()];
-                        if (tmp_nodes_.get(nodes_, x, y)) {
-                                lay.shape()->multipoint(type, nodes_.size(), x, y);
+                if (lay.shape()->type() == type && has_key_value(way->tags(), lay.type().c_str(), lay.subtype().c_str())) {
+                        double x[way->nodes().size()], y[way->nodes().size()];
+                        if (tmp_nodes_.get(way->nodes(), x, y)) {
+                                lay.shape()->multipoint(type, way->nodes().size(), x, y);
                                 ++exported_ways_;
                         }
                         break;
@@ -163,12 +123,12 @@ void handler::end_way() {
         }
 }
 
-bool handler::is_area() {
-        return has_key_value(tags_, "area", "yes")      ||
-               has_key(tags_, "landuse")                ||
-               has_key_value(tags_, "natural", "land")  ||
-               has_key_value(tags_, "natural", "water") ||
-               has_key_value(tags_, "natural", "woord");
+bool handler::is_area(const shared_ptr<Osmium::OSM::Way>& way) {
+        return has_key_value(way->tags(), "area", "yes")      ||
+               has_key(way->tags(), "landuse")                ||
+               has_key_value(way->tags(), "natural", "land")  ||
+               has_key_value(way->tags(), "natural", "water") ||
+               has_key_value(way->tags(), "natural", "woord");
 }
 
 }

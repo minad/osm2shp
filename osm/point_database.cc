@@ -45,7 +45,7 @@ void point_database::set(int64_t id, double x, double y) {
                 db_error("step failed");
 }
 
-bool point_database::get(const std::vector<int64_t>& ids, double* x_result, double* y_result) {
+bool point_database::get(const Osmium::OSM::WayNodeList& ids, double* x_result, double* y_result) {
         const int block_size = 128;
 
         int points = ids.size();
@@ -56,7 +56,7 @@ bool point_database::get(const std::vector<int64_t>& ids, double* x_result, doub
         stmt_wrapper block_stmt, rest_stmt;
 
         int todo = points;
-        std::vector<int64_t>::const_iterator i = ids.begin();
+        std::vector<Osmium::OSM::WayNode>::const_iterator i = ids.begin();
         while (todo > 0) {
                 int step_size;
                 sqlite3_stmt* stmt;
@@ -74,8 +74,10 @@ bool point_database::get(const std::vector<int64_t>& ids, double* x_result, doub
                         stmt = rest_stmt.stmt = build_fetch_stmt(todo);
                 }
 
-                for (int n = 1; n <= step_size; ++n)
-                        sqlite3_bind_int64(stmt, n, *i++);
+                for (int n = 1; n <= step_size; ++n) {
+                        sqlite3_bind_int64(stmt, n, i->ref());
+                        i++;
+                }
 
                 int ret;
                 while ((ret = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -83,8 +85,8 @@ bool point_database::get(const std::vector<int64_t>& ids, double* x_result, doub
                         double x = sqlite3_column_double(stmt, 1);
                         double y = sqlite3_column_double(stmt, 2);
                         int n = 0;
-                        foreach (int64_t id, ids) {
-                                if (id == found) {
+                        foreach (const Osmium::OSM::WayNode &node, ids) {
+                                if (node.ref() == found) {
                                         x_result[n] = x;
                                         y_result[n] = y;
                                         resolved[n] = true;
@@ -101,7 +103,7 @@ bool point_database::get(const std::vector<int64_t>& ids, double* x_result, doub
 
         for (int n = 0; n < points; ++n) {
                 if (!resolved[n]) {
-                        std::cerr << "unresolved node " << ids.at(n) << std::endl;
+                        std::cerr << "unresolved node " << ids[n].ref() << std::endl;
                         return false;
                 }
         }
