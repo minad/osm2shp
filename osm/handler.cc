@@ -12,13 +12,13 @@ namespace osm {
 
 template<typename T, class K>
 inline bool has_key(const T& map, const K& key) {
-		const char *v = map.get_tag_by_key(key);
+		const char *v = map.get_value_by_key(key);
 		return v;
 }
 
 template<typename T, class K, class V>
 inline bool has_key_value(const T& map, const K& key, const V& value) {
-		const char *v = map.get_tag_by_key(key);
+		const char *v = map.get_value_by_key(key);
 		return v && !strcmp(v, value);
 }
 
@@ -88,7 +88,7 @@ void handler::node(const shared_ptr<Osmium::OSM::Node const>& node) {
 
         tmp_nodes_.set(id_, x_, y_);
 
-        const char* name = node->tags().get_tag_by_key("name");
+        const char* name = node->tags().get_value_by_key("name");
         if (!name)
                 return;
 
