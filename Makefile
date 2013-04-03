@@ -16,7 +16,7 @@ FILES = \
   osm/point_database.o
 
 osm2shp: $(FILES)
-	$(CPP) $(CXXFLAGS) $+ -lexpat -lsqlite3 -lshp -lboost_iostreams $(LIB_PROTOBUF) $(LIB_SHAPE) -o $@
+	$(CPP) $(CXXFLAGS) $+ -lexpat -lsqlite3 -lshp $(LIB_PROTOBUF) $(LIB_SHAPE) -o $@
 
 %.o: %.cc
 	$(CPP) $(CXXFLAGS) -c $< -o $@
