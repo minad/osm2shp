@@ -1,6 +1,7 @@
 #ifndef OSM2SHP_OSM_SHAPEFILE_HPP
 #define OSM2SHP_OSM_SHAPEFILE_HPP
 
+#include <string>
 #include <shapefil.h>
 #include <boost/utility.hpp>
 
