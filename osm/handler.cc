@@ -1,6 +1,7 @@
 #include "handler.hpp"
 #include "shapefile.hpp"
 
+#include <iostream>
 #include <shapefil.h>
 #include <sys/stat.h>
 #include <boost/foreach.hpp>

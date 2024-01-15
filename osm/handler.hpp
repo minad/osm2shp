@@ -5,6 +5,7 @@
 #include "layer.hpp"
 
 #include <map>
+#include <string>
 #include <vector>
 
 #include <osmium/osm/way.hpp>
